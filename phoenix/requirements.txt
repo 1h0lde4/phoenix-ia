@@ -1,0 +1,7 @@
+langchain
+langchain-community
+chromadb
+duckduckgo-search
+fastapi
+uvicorn
+pydantic
