@@ -5,3 +5,4 @@ duckduckgo-search
 fastapi
 uvicorn
 pydantic
+sqlalchemy
