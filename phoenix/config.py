@@ -14,7 +14,6 @@ SKILLS_DIR.mkdir(exist_ok=True)
 TRAINING_DATA_DIR = DATA_DIR / "training_data"
 TRAINING_DATA_DIR.mkdir(exist_ok=True)
 
-# LLM settings – now using a local GGUF file
 LLM_MODEL_PATH = os.getenv(
     "PHOENIX_MODEL_PATH",
     str(PHOENIX_HOME / "models" / "llama-3.2-1b-instruct.Q4_K_M.gguf")
@@ -22,6 +21,12 @@ LLM_MODEL_PATH = os.getenv(
 EMBEDDING_MODEL = os.getenv("PHOENIX_EMBED_MODEL", "all-MiniLM-L6-v2")
 MAX_WORKING_MEMORY_TOKENS = int(os.getenv("PHOENIX_MAX_MEMORY", 2000))
 
-# Memory priority directories
 P1_RULES_DIR = DATA_DIR / "memory" / "rules"
 P1_RULES_DIR.mkdir(parents=True, exist_ok=True)
+
+# NEW: auto‑improvement trigger
+AUTO_IMPROVE_INTERVAL = int(os.getenv("PHOENIX_AUTO_IMPROVE_INTERVAL", "5"))  # every 5 messages
+
+# NEW: Personas directory
+AGENTS_DIR = DATA_DIR / "agents"
+AGENTS_DIR.mkdir(parents=True, exist_ok=True)
