@@ -126,8 +126,14 @@ class SemanticMemoryStore:
         doc = Document(page_content=text, metadata=metadata)
         self.vectorstore.add_documents([doc])
         return doc
-
-    def recall(self, query, k=3):
+def add_improvement_log(self, topic, summary, source_url=None):
+    metadata = {"type": "improvement_log"}
+    if source_url:
+        metadata["source_url"] = source_url
+    text = f"IMPROVEMENT: {topic}\nSummary: {summary}"
+    self.add_memory(text, metadata=metadata)
+    
+def recall(self, query, k=3):
         return multi_signal_recall(query, self.vectorstore, k)
 
     def verify_citation(self, doc_id):
