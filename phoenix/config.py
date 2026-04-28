@@ -16,7 +16,7 @@ TRAINING_DATA_DIR.mkdir(exist_ok=True)
 
 LLM_MODEL_PATH = os.getenv(
     "PHOENIX_MODEL_PATH",
-    str(PHOENIX_HOME / "models" / "llama-3.2-1b-instruct.Q4_K_M.gguf")
+    str(PHOENIX_HOME / "models" / "mistral-7b-instruct-v0.3.Q4_K_M.gguf")
 )
 EMBEDDING_MODEL = os.getenv("PHOENIX_EMBED_MODEL", "all-MiniLM-L6-v2")
 MAX_WORKING_MEMORY_TOKENS = int(os.getenv("PHOENIX_MAX_MEMORY", 2000))
@@ -24,15 +24,12 @@ MAX_WORKING_MEMORY_TOKENS = int(os.getenv("PHOENIX_MAX_MEMORY", 2000))
 P1_RULES_DIR = DATA_DIR / "memory" / "rules"
 P1_RULES_DIR.mkdir(parents=True, exist_ok=True)
 
-# NEW: auto‑improvement trigger
-AUTO_IMPROVE_INTERVAL = int(os.getenv("PHOENIX_AUTO_IMPROVE_INTERVAL", "5"))  # every 5 messages
-
-# NEW: Personas directory
+AUTO_IMPROVE_INTERVAL = int(os.getenv("PHOENIX_AUTO_IMPROVE_INTERVAL", "5"))
 AGENTS_DIR = DATA_DIR / "agents"
 AGENTS_DIR.mkdir(parents=True, exist_ok=True)
+
 MODEL_REGISTRY_PATH = DATA_DIR / "model_registry.json"
 
-# Default models (these will be auto-created if registry is empty)
 DEFAULT_MODELS = [
     {
         "name": "mistral-7b",
@@ -47,13 +44,9 @@ DEFAULT_MODELS = [
         "tags": ["simple", "fast"],
         "n_ctx": 2048,
         "chat_format": "chatml"
-    },
-    # Codestral is optional; download only if you want
-    # {
-    #     "name": "codestral-22b",
-    #     "path": str(PHOENIX_HOME / "models" / "codestral-22b.Q4_K_M.gguf"),
-    #     "tags": ["code"],
-    #     "n_ctx": 8192,
-    #     "chat_format": "mistral-instruct"   # Codestral uses Mistral format
-    # }
+    }
 ]
+
+# Proactive memory worker
+MEMORY_WORKER_INTERVAL = int(os.getenv("PHOENIX_MEMORY_WORKER_INTERVAL", "30"))
+MEMORY_WORKER_ENABLED = os.getenv("PHOENIX_MEMORY_WORKER_ENABLED", "true").lower() in ("true", "1")
