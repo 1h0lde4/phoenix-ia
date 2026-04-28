@@ -10,7 +10,7 @@ from typing import List, Optional
 from orchestrator import PhoenixOrchestrator
 from config import CONVERSATION_DB_PATH
 
-app = FastAPI(title="Phoenix AI", version="0.2.0")
+app = FastAPI(title="Phoenix AI", version="0.3.0")
 orchestrator = PhoenixOrchestrator()
 
 # ---------- Static files (portal) ----------
@@ -54,6 +54,7 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionChoice]
     usage: ChatCompletionUsage
 
+# ---------- Chat endpoint ----------
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
 async def chat_completions(request: ChatCompletionRequest):
     user_msg = request.messages[-1].content
@@ -81,6 +82,7 @@ async def chat_completions(request: ChatCompletionRequest):
 async def stream_chat(request: ChatCompletionRequest):
     return {"detail": "Streaming not implemented yet"}
 
+# ---------- Development status API ----------
 @app.get("/api/status")
 async def dev_status():
     skill_count = len(orchestrator.skill_registry.skills)
@@ -90,28 +92,51 @@ async def dev_status():
     except:
         memory_count = 0
     try:
-        fts_count = sqlite3.connect(CONVERSATION_DB_PATH).execute("SELECT count(*) FROM messages_fts").fetchone()[0]
+        fts_count = sqlite3.connect(CONVERSATION_DB_PATH).execute(
+            "SELECT count(*) FROM messages_fts"
+        ).fetchone()[0]
     except:
         fts_count = 0
-# Look for recent improvement logs
-try:
-    improvements = orchestrator.semantic_memory.recall("IMPROVEMENT:", k=5)
-    improvement_list = [imp for imp in improvements if imp.startswith("IMPROVEMENT:")]
-except:
-    improvement_list = []
 
-# … include in return dict:
-"improvements": improvement_list[:3],
+    # Recent improvement logs
+    improvements = []
+    try:
+        # Recall memories tagged as improvement_log
+        docs = orchestrator.semantic_memory.vectorstore.get(
+            where={"type": "improvement_log"}, limit=3
+        )
+        # Chroma's get returns ids, metadatas, documents
+        if docs and docs['documents']:
+            for doc in docs['documents'][:3]:
+                if doc.startswith("IMPROVEMENT:"):
+                    improvements.append(doc[:200] + "..." if len(doc) > 200 else doc)
+    except:
+        pass
+
+    active_model = orchestrator.router.loaded_name if orchestrator.router.loaded_model else "none"
+
     return {
-        "model": os.getenv("PHOENIX_MODEL_PATH", "llama-3.2-1b-instruct.Q4_K_M.gguf"),
+        "status": "ok",
+        "name": "Phoenix AI",
+        "version": "0.3.0",
+        "model": {
+            "active": active_model,
+            "registry": orchestrator.router.list_models()
+        },
         "skills": {"count": skill_count, "names": skill_names},
-        "memory": {"total_facts": memory_count, "fts_indexed": fts_count, "method": "RRF (semantic + keyword)"},
+        "memory": {
+            "total_facts": memory_count,
+            "fts_indexed": fts_count,
+            "method": "RRF (semantic + keyword)"
+        },
         "training": {"status": "idle", "last_run": "never"},
+        "improvements": improvements,
         "logs": [
             "Server started",
             f"Loaded {skill_count} skills",
             "Semantic memory online",
-            f"FTS5 index ready ({fts_count} entries)"
+            f"FTS5 index ready ({fts_count} entries)",
+            f"Active model: {active_model}"
         ]
     }
 
