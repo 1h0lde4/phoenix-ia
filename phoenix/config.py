@@ -30,3 +30,30 @@ AUTO_IMPROVE_INTERVAL = int(os.getenv("PHOENIX_AUTO_IMPROVE_INTERVAL", "5"))  # 
 # NEW: Personas directory
 AGENTS_DIR = DATA_DIR / "agents"
 AGENTS_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_REGISTRY_PATH = DATA_DIR / "model_registry.json"
+
+# Default models (these will be auto-created if registry is empty)
+DEFAULT_MODELS = [
+    {
+        "name": "mistral-7b",
+        "path": str(PHOENIX_HOME / "models" / "mistral-7b-instruct-v0.3.Q4_K_M.gguf"),
+        "tags": ["reasoning", "general"],
+        "n_ctx": 8192,
+        "chat_format": "mistral-instruct"
+    },
+    {
+        "name": "tinyllama-1.1b",
+        "path": str(PHOENIX_HOME / "models" / "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"),
+        "tags": ["simple", "fast"],
+        "n_ctx": 2048,
+        "chat_format": "chatml"
+    },
+    # Codestral is optional; download only if you want
+    # {
+    #     "name": "codestral-22b",
+    #     "path": str(PHOENIX_HOME / "models" / "codestral-22b.Q4_K_M.gguf"),
+    #     "tags": ["code"],
+    #     "n_ctx": 8192,
+    #     "chat_format": "mistral-instruct"   # Codestral uses Mistral format
+    # }
+]
