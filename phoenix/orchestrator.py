@@ -43,7 +43,6 @@ class PhoenixOrchestrator:
 
     def get_working_memory(self, session_id):
         if session_id not in self.sessions:
-            # Temporarily give it the reasoning model; will be overridden per request
             self.sessions[session_id] = WorkingMemory(self.router.get_model("reasoning"), session_id)
         return self.sessions[session_id]
 
@@ -99,7 +98,7 @@ If you have enough information, answer directly in natural language.
         llm = self.router.get_model(task_hint)
 
         wm = self.get_working_memory(session_id)
-        wm.llm = llm   # ensure the working memory uses the same model for summarization
+        wm.llm = llm
 
         relevant_memories = self.semantic_memory.recall(user_input, k=2)
         memory_context = "\n".join([f"- {self._trim_memory(m)}" for m in relevant_memories])
@@ -110,7 +109,7 @@ If you have enough information, answer directly in natural language.
 
         messages = [system_msg] + history_msgs + [user_msg]
         response = llm.invoke(messages)
-        assistant_text = response.content.strip() if hasattr(response, 'content') else response.strip()
+        assistant_text = response.strip() if isinstance(response, str) else response.content.strip()
 
         tool_name, tool_params = self._parse_tool_call(assistant_text)
         if tool_name:
@@ -124,7 +123,7 @@ If you have enough information, answer directly in natural language.
 
             final_messages = [system_msg] + wm.get_messages_for_context()
             final_response = llm.invoke(final_messages)
-            final_text = final_response.content.strip() if hasattr(final_response, 'content') else final_response.strip()
+            final_text = final_response.strip() if isinstance(final_response, str) else final_response.content.strip()
             wm.add_ai_message(final_text)
 
             citation = f"session:{session_id}:{datetime.datetime.now().isoformat()}"
@@ -160,7 +159,7 @@ Conversations:
         recent_memories = self.semantic_memory.recall("recent conversation", k=5)
         gap_prompt += "\n".join(recent_memories[:2000])
         gap_response = llm.invoke(gap_prompt)
-        gap_text = gap_response.content.strip() if hasattr(gap_response, 'content') else gap_response.strip()
+        gap_text = gap_response.strip() if isinstance(gap_response, str) else gap_response.content.strip()
         try:
             gaps = json.loads(gap_text)
             if not isinstance(gaps, list):
@@ -183,9 +182,10 @@ Conversations:
         if "phoenix-trainer" in self.personas:
             trainer_prompt = self.personas["phoenix-trainer"] + f"\n\nRecent gaps: {gaps}\nShould we schedule a training round?"
             trainer_response = llm.invoke(trainer_prompt)
+            trainer_text = trainer_response.strip() if isinstance(trainer_response, str) else trainer_response.content.strip()
             self.semantic_memory.add_improvement_log(
                 topic="training_decision",
-                summary=trainer_response.strip()[:400]
+                summary=trainer_text[:400]
             )
 
     def clear_session(self, session_id):
@@ -236,7 +236,7 @@ Conversations:
             for mem in all_mems:
                 summary_prompt += f"- {mem[:200]}\n"
             summary_response = llm.invoke([HumanMessage(content=summary_prompt)])
-            summary_text = summary_response.content.strip()
+            summary_text = summary_response.strip() if isinstance(summary_response, str) else summary_response.content.strip()
             self.semantic_memory.add_memory(
                 f"Consolidated knowledge: {summary_text}",
                 metadata={"type": "consolidation"}
