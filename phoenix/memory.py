@@ -1,6 +1,5 @@
 import sqlite3
 import datetime
-from pathlib import Path
 from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -8,26 +7,22 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from config import CONVERSATION_DB_PATH, CHROMA_DIR, EMBEDDING_MODEL, MAX_WORKING_MEMORY_TOKENS
 
-# ---------- SQLite-backed message history ----------
 def get_chat_message_history(session_id="default"):
     return SQLChatMessageHistory(
         session_id=session_id,
         connection_string=f"sqlite:///{CONVERSATION_DB_PATH}"
     )
 
-# ---------- FTS5 setup (called once) ----------
 def setup_fts():
     conn = sqlite3.connect(CONVERSATION_DB_PATH)
     conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(session_id, role, content)")
     conn.commit()
     conn.close()
 
-# ---------- Keyword search (FTS5) ----------
 def keyword_search(query, k=5):
     conn = sqlite3.connect(CONVERSATION_DB_PATH)
     cursor = conn.cursor()
-    # FTS5 MATCH – requires proper escaping; keep it simple for now
-    safe_query = query.replace('"', '')  # remove quotes to avoid syntax issues
+    safe_query = query.replace('"', '')
     cursor.execute("""
         SELECT session_id, role, content, rank
         FROM messages_fts
@@ -45,14 +40,12 @@ def keyword_search(query, k=5):
     conn.close()
     return results
 
-# ---------- Rough token counting ----------
 def estimate_tokens(messages):
     total = 0
     for msg in messages:
         total += len(msg.content) // 4
     return total
 
-# ---------- Working memory (with FTS insertion) ----------
 class WorkingMemory:
     def __init__(self, llm, session_id="default", max_tokens=MAX_WORKING_MEMORY_TOKENS):
         self.llm = llm
@@ -102,11 +95,8 @@ class WorkingMemory:
         self._summarize_and_replace()
         return self.history.messages
 
-# ---------- Multi-signal recall (RRF) ----------
 def multi_signal_recall(query, vectorstore, k=3):
-    # Semantic (Chroma)
     vec_results = vectorstore.similarity_search_with_score(query, k=k*2)
-    # Keyword (FTS5)
     kw_results = keyword_search(query, k=k*2)
 
     rrf = {}
@@ -119,7 +109,6 @@ def multi_signal_recall(query, vectorstore, k=3):
     sorted_texts = sorted(rrf.items(), key=lambda x: x[1], reverse=True)[:k]
     return [text for text, score in sorted_texts]
 
-# ---------- Semantic long-term memory (with citations) ----------
 class SemanticMemoryStore:
     def __init__(self):
         self.embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
@@ -136,12 +125,11 @@ class SemanticMemoryStore:
             metadata["citation"] = citation
         doc = Document(page_content=text, metadata=metadata)
         self.vectorstore.add_documents([doc])
-        self.vectorstore.persist()
         return doc
 
     def recall(self, query, k=3):
         return multi_signal_recall(query, self.vectorstore, k)
 
     def verify_citation(self, doc_id):
-        # Placeholder: always returns True (real verification later)
+        # Placeholder – always true for now
         return True
