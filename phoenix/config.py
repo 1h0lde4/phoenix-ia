@@ -14,8 +14,14 @@ SKILLS_DIR.mkdir(exist_ok=True)
 TRAINING_DATA_DIR = DATA_DIR / "training_data"
 TRAINING_DATA_DIR.mkdir(exist_ok=True)
 
-LLM_MODEL = os.getenv("PHOENIX_MODEL", "llama3.1:8b")
-LLM_BASE_URL = os.getenv("PHOENIX_LLM_URL", "http://localhost:11434")
-EMBEDDING_MODEL = os.getenv("PHOENIX_EMBED_MODEL", "nomic-embed-text")
-
+# LLM settings – now using a local GGUF file
+LLM_MODEL_PATH = os.getenv(
+    "PHOENIX_MODEL_PATH",
+    str(PHOENIX_HOME / "models" / "llama-3.2-1b-instruct.Q4_K_M.gguf")
+)
+EMBEDDING_MODEL = os.getenv("PHOENIX_EMBED_MODEL", "all-MiniLM-L6-v2")
 MAX_WORKING_MEMORY_TOKENS = int(os.getenv("PHOENIX_MAX_MEMORY", 2000))
+
+# Memory priority directories
+P1_RULES_DIR = DATA_DIR / "memory" / "rules"
+P1_RULES_DIR.mkdir(parents=True, exist_ok=True)
