@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from orchestrator import PhoenixOrchestrator
-from config import CONVERSATION_DB_PATH
+from config import CONVERSATION_DB_PATH, MEMORY_WORKER_ENABLED, MEMORY_WORKER_INTERVAL
 
 app = FastAPI(title="Phoenix AI", version="0.3.0")
 orchestrator = PhoenixOrchestrator()
@@ -54,7 +54,6 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionChoice]
     usage: ChatCompletionUsage
 
-# ---------- Chat endpoint ----------
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
 async def chat_completions(request: ChatCompletionRequest):
     user_msg = request.messages[-1].content
@@ -82,7 +81,6 @@ async def chat_completions(request: ChatCompletionRequest):
 async def stream_chat(request: ChatCompletionRequest):
     return {"detail": "Streaming not implemented yet"}
 
-# ---------- Development status API ----------
 @app.get("/api/status")
 async def dev_status():
     skill_count = len(orchestrator.skill_registry.skills)
@@ -98,14 +96,11 @@ async def dev_status():
     except:
         fts_count = 0
 
-    # Recent improvement logs
     improvements = []
     try:
-        # Recall memories tagged as improvement_log
         docs = orchestrator.semantic_memory.vectorstore.get(
             where={"type": "improvement_log"}, limit=3
         )
-        # Chroma's get returns ids, metadatas, documents
         if docs and docs['documents']:
             for doc in docs['documents'][:3]:
                 if doc.startswith("IMPROVEMENT:"):
@@ -129,6 +124,11 @@ async def dev_status():
             "fts_indexed": fts_count,
             "method": "RRF (semantic + keyword)"
         },
+        "memory_worker": {
+            "enabled": MEMORY_WORKER_ENABLED,
+            "interval_seconds": MEMORY_WORKER_INTERVAL,
+            "last_activity": "just now"
+        },
         "training": {"status": "idle", "last_run": "never"},
         "improvements": improvements,
         "logs": [
@@ -136,7 +136,8 @@ async def dev_status():
             f"Loaded {skill_count} skills",
             "Semantic memory online",
             f"FTS5 index ready ({fts_count} entries)",
-            f"Active model: {active_model}"
+            f"Active model: {active_model}",
+            "Proactive memory worker " + ("active" if MEMORY_WORKER_ENABLED else "inactive")
         ]
     }
 
