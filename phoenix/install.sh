@@ -19,14 +19,24 @@ mkdir -p "${PHOENIX_HOME}/phoenix_data/training_data"
 mkdir -p "${PHOENIX_HOME}/static"
 
 # 2. Download the GGUF model (if missing)
-MODEL_PATH="${PHOENIX_HOME}/models/llama-3.2-1b-instruct.Q4_K_M.gguf"
-if [ ! -f "$MODEL_PATH" ]; then
-    echo "📥 Downloading lightweight Llama 3.2 1B model (~1GB)..."
-    wget -O "$MODEL_PATH" \
-        "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+# Download two models: Mistral 7B for reasoning, TinyLlama for fast tasks
+echo "📥 Downloading models..."
+cd "${PHOENIX_HOME}/models"
+
+if [ ! -f "mistral-7b-instruct-v0.3.Q4_K_M.gguf" ]; then
+    wget -O mistral-7b-instruct-v0.3.Q4_K_M.gguf \
+        "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf"
 else
-    echo "✅ Model already downloaded."
+    echo "   Mistral already downloaded."
 fi
+
+if [ ! -f "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf" ]; then
+    wget -O tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
+        "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+else
+    echo "   TinyLlama already downloaded."
+fi
+# (Optionally, later you can add Codestral)
 
 # 3. Write all source files
 
