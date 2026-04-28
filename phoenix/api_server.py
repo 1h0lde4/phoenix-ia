@@ -93,7 +93,15 @@ async def dev_status():
         fts_count = sqlite3.connect(CONVERSATION_DB_PATH).execute("SELECT count(*) FROM messages_fts").fetchone()[0]
     except:
         fts_count = 0
+# Look for recent improvement logs
+try:
+    improvements = orchestrator.semantic_memory.recall("IMPROVEMENT:", k=5)
+    improvement_list = [imp for imp in improvements if imp.startswith("IMPROVEMENT:")]
+except:
+    improvement_list = []
 
+# … include in return dict:
+"improvements": improvement_list[:3],
     return {
         "model": os.getenv("PHOENIX_MODEL_PATH", "llama-3.2-1b-instruct.Q4_K_M.gguf"),
         "skills": {"count": skill_count, "names": skill_names},
