@@ -2,22 +2,20 @@ import json
 import re
 import datetime
 from pathlib import Path
-from langchain_community.llms.llamacpp import LlamaCpp
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from memory import WorkingMemory, SemanticMemoryStore, setup_fts
 from skill_registry import SkillRegistry
-from config import LLM_MODEL_PATH, P1_RULES_DIR, AUTO_IMPROVE_INTERVAL, AGENTS_DIR
+from model_router import ModelRouter, ModelInfo
+from config import MODEL_REGISTRY_PATH, DEFAULT_MODELS, P1_RULES_DIR, AUTO_IMPROVE_INTERVAL, AGENTS_DIR
 
 class PhoenixOrchestrator:
     def __init__(self):
-        self.llm = LlamaCpp(
-    model_path=LLM_MODEL_PATH,
-    temperature=0.7,
-    max_tokens=512,                # can now be generous
-    n_ctx=8192,                    # Mistral's native 8K context
-    chat_format="mistral-instruct", # use Mistral's chat template
-    verbose=False
-)
+        self.router = ModelRouter(registry_path=MODEL_REGISTRY_PATH)
+        # Ensure default models are in registry
+        if not self.router.models:
+            for model_def in DEFAULT_MODELS:
+                info = ModelInfo(**model_def)
+                self.router.add_model(info)
         self.skill_registry = SkillRegistry()
         self.semantic_memory = SemanticMemoryStore()
         self.sessions = {}
@@ -34,7 +32,7 @@ class PhoenixOrchestrator:
 
     def get_working_memory(self, session_id):
         if session_id not in self.sessions:
-            self.sessions[session_id] = WorkingMemory(self.llm, session_id)
+            self.sessions[session_id] = WorkingMemory(self.router.get_model("reasoning"), session_id)  # temporary; real model will be chosen per request
         return self.sessions[session_id]
 
     def _load_p1_rules(self):
@@ -43,6 +41,17 @@ class PhoenixOrchestrator:
             for rule_file in P1_RULES_DIR.glob("*.md"):
                 rules += rule_file.read_text() + "\n"
         return rules
+
+    def _detect_task_hint(self, user_input: str) -> str:
+        """Simple keyword-based task detection. Returns 'reasoning', 'code', or 'simple'."""
+        code_keywords = ["write a function", "implement", "code", "debug", "program", "python", "javascript", "function", "class", "script"]
+        simple_keywords = ["what is", "tell me a joke", "quick", "simple", "yes or no", "short answer"]
+        # check coding first
+        if any(word in user_input.lower() for word in code_keywords):
+            return "code"
+        if any(word in user_input.lower() for word in simple_keywords):
+            return "simple"
+        return "reasoning"
 
     def _build_system_prompt(self, tools_schema):
         tool_descriptions = "\n".join(
@@ -73,14 +82,19 @@ If you have enough information, answer directly in natural language.
         return None, None
 
     def _trim_memory(self, text, max_chars=200):
-        """Shorten memory text to max_chars to save tokens."""
         return text[:max_chars] + "..." if len(text) > max_chars else text
 
     def process_input(self, user_input: str, session_id="default"):
-        wm = self.get_working_memory(session_id)
+        # Detect task and get appropriate model
+        task_hint = self._detect_task_hint(user_input)
+        llm = self.router.get_model(task_hint)
 
-        # Retrieve and shorten memories
-        relevant_memories = self.semantic_memory.recall(user_input, k=2)  # k=2 to save space
+        wm = self.get_working_memory(session_id)
+        # Note: WorkingMemory currently holds a different model instance; we'll fix that by passing llm to get_working_memory later.
+        # For now, we'll override the wm's llm reference before using it in the rest of the method.
+        wm.llm = llm   # hack for now
+
+        relevant_memories = self.semantic_memory.recall(user_input, k=2)
         memory_context = "\n".join([f"- {self._trim_memory(m)}" for m in relevant_memories])
 
         system_msg = self._build_system_prompt(self.skill_registry.get_tool_schemas())
@@ -88,7 +102,7 @@ If you have enough information, answer directly in natural language.
         user_msg = HumanMessage(content=f"Relevant memories:\n{memory_context}\n\nUser: {user_input}")
 
         messages = [system_msg] + history_msgs + [user_msg]
-        response = self.llm.invoke(messages)
+        response = llm.invoke(messages)
         assistant_text = response.content.strip() if hasattr(response, 'content') else response.strip()
 
         tool_name, tool_params = self._parse_tool_call(assistant_text)
@@ -102,7 +116,7 @@ If you have enough information, answer directly in natural language.
             wm.add_ai_message(f"Tool result: {tool_result}")
 
             final_messages = [system_msg] + wm.get_messages_for_context()
-            final_response = self.llm.invoke(final_messages)
+            final_response = llm.invoke(final_messages)
             final_text = final_response.content.strip() if hasattr(final_response, 'content') else final_response.strip()
             wm.add_ai_message(final_text)
 
@@ -130,15 +144,16 @@ If you have enough information, answer directly in natural language.
             self.maybe_self_improve()
 
     def maybe_self_improve(self):
-        """Autonomous self‑improvement step: find gaps, search web, ingest."""
+        """Self‑improvement step using reasoning model."""
+        llm = self.router.get_model("reasoning")  # always use reasoning for introspection
         gap_prompt = """You are Phoenix's self-analysis module.
-Review the last few conversations (provided below as memory) and list any topics you were unsure about or lacked current information.
+Review the last few conversations and list any topics you were unsure about or lacked current information.
 Output a JSON list of strings, e.g. ["topic1", "topic2"]. If none, output [].
 Conversations:
 """
         recent_memories = self.semantic_memory.recall("recent conversation", k=5)
-        gap_prompt += "\n".join(recent_memories[:2000])  # limit chars
-        gap_response = self.llm.invoke(gap_prompt)
+        gap_prompt += "\n".join(recent_memories[:2000])
+        gap_response = llm.invoke(gap_prompt)
         gap_text = gap_response.content.strip() if hasattr(gap_response, 'content') else gap_response.strip()
         try:
             gaps = json.loads(gap_text)
@@ -161,7 +176,7 @@ Conversations:
 
         if "phoenix-trainer" in self.personas:
             trainer_prompt = self.personas["phoenix-trainer"] + f"\n\nRecent gaps: {gaps}\nShould we schedule a training round?"
-            trainer_response = self.llm.invoke(trainer_prompt)
+            trainer_response = llm.invoke(trainer_prompt)
             self.semantic_memory.add_improvement_log(
                 topic="training_decision",
                 summary=trainer_response.strip()[:400]
