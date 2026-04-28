@@ -1,9 +1,8 @@
 import json
 import re
 import datetime
-import time
 from pathlib import Path
-from langchain_community.llms import LlamaCpp
+from langchain_community.llms.llamacpp import LlamaCpp
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from memory import WorkingMemory, SemanticMemoryStore, setup_fts
 from skill_registry import SkillRegistry
@@ -14,19 +13,19 @@ class PhoenixOrchestrator:
         self.llm = LlamaCpp(
             model_path=LLM_MODEL_PATH,
             temperature=0.7,
-            max_tokens=512,
-            n_ctx=2048,
+            max_tokens=572,                # reduced
+            n_ctx=8192,                    # main context
+            model_kwargs={"n_ctx": 8192},  # force via model_kwargs as backup
             verbose=False
         )
         self.skill_registry = SkillRegistry()
         self.semantic_memory = SemanticMemoryStore()
         self.sessions = {}
-        self.message_count = 0          # track messages for auto‑improve
+        self.message_count = 0
         setup_fts()
         self._load_personas()
 
     def _load_personas(self):
-        """Load specialist persona prompts from AGENTS_DIR."""
         self.personas = {}
         if AGENTS_DIR.exists():
             for file in AGENTS_DIR.glob("*.md"):
@@ -73,11 +72,16 @@ If you have enough information, answer directly in natural language.
                 pass
         return None, None
 
+    def _trim_memory(self, text, max_chars=200):
+        """Shorten memory text to max_chars to save tokens."""
+        return text[:max_chars] + "..." if len(text) > max_chars else text
+
     def process_input(self, user_input: str, session_id="default"):
         wm = self.get_working_memory(session_id)
 
-        relevant_memories = self.semantic_memory.recall(user_input, k=3)
-        memory_context = "\n".join([f"- {m}" for m in relevant_memories])
+        # Retrieve and shorten memories
+        relevant_memories = self.semantic_memory.recall(user_input, k=2)  # k=2 to save space
+        memory_context = "\n".join([f"- {self._trim_memory(m)}" for m in relevant_memories])
 
         system_msg = self._build_system_prompt(self.skill_registry.get_tool_schemas())
         history_msgs = wm.get_messages_for_context()
@@ -123,19 +127,17 @@ If you have enough information, answer directly in natural language.
     def _count_message(self):
         self.message_count += 1
         if self.message_count % AUTO_IMPROVE_INTERVAL == 0:
-            # Run self‑improvement in a fire‑and‑forget manner (for sync we'll block briefly)
             self.maybe_self_improve()
 
     def maybe_self_improve(self):
         """Autonomous self‑improvement step: find gaps, search web, ingest."""
-        # 1. Ask LLM to identify topics where it was uncertain
         gap_prompt = """You are Phoenix's self-analysis module.
 Review the last few conversations (provided below as memory) and list any topics you were unsure about or lacked current information.
 Output a JSON list of strings, e.g. ["topic1", "topic2"]. If none, output [].
 Conversations:
 """
-        recent_memories = self.semantic_memory.recall("recent conversation", k=10)  # crude
-        gap_prompt += "\n".join(recent_memories)
+        recent_memories = self.semantic_memory.recall("recent conversation", k=5)
+        gap_prompt += "\n".join(recent_memories[:2000])  # limit chars
         gap_response = self.llm.invoke(gap_prompt)
         gap_text = gap_response.content.strip() if hasattr(gap_response, 'content') else gap_response.strip()
         try:
@@ -148,27 +150,21 @@ Conversations:
         if not gaps:
             return
 
-        # 2. For each gap, perform a web search and ingest
-        for topic in gaps[:3]:  # limit to 3 to save time
+        for topic in gaps[:2]:
             search_result = self.skill_registry.execute("web_search", query=topic)
             if search_result and "No results found." not in search_result:
-                # Ingest the raw results as a memory with citation
                 self.semantic_memory.add_improvement_log(
                     topic=topic,
-                    summary=search_result[:500],  # store first 500 chars
-                    source_url="web_search"  # real URL extraction would be added later
+                    summary=search_result[:400],
+                    source_url="web_search"
                 )
-                # Also log in dashboard logs (via status API we'll update)
-                # For now, just store; the next status call will pick it up
 
-        # 3. Call the trainer persona if available
         if "phoenix-trainer" in self.personas:
             trainer_prompt = self.personas["phoenix-trainer"] + f"\n\nRecent gaps: {gaps}\nShould we schedule a training round?"
             trainer_response = self.llm.invoke(trainer_prompt)
-            # Save trainer's response as a log
             self.semantic_memory.add_improvement_log(
                 topic="training_decision",
-                summary=trainer_response.strip()[:500]
+                summary=trainer_response.strip()[:400]
             )
 
     def clear_session(self, session_id):
