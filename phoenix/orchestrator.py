@@ -1,17 +1,26 @@
 import json
 import re
 import datetime
+import threading
+import time
+import logging
 from pathlib import Path
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from memory import WorkingMemory, SemanticMemoryStore, setup_fts
 from skill_registry import SkillRegistry
 from model_router import ModelRouter, ModelInfo
-from config import MODEL_REGISTRY_PATH, DEFAULT_MODELS, P1_RULES_DIR, AUTO_IMPROVE_INTERVAL, AGENTS_DIR
+from config import (
+    MODEL_REGISTRY_PATH, DEFAULT_MODELS,
+    P1_RULES_DIR, AUTO_IMPROVE_INTERVAL, AGENTS_DIR,
+    MEMORY_WORKER_INTERVAL, MEMORY_WORKER_ENABLED
+)
+
+logger = logging.getLogger("phoenix.orchestrator")
+logging.basicConfig(level=logging.INFO)
 
 class PhoenixOrchestrator:
     def __init__(self):
         self.router = ModelRouter(registry_path=MODEL_REGISTRY_PATH)
-        # Ensure default models are in registry
         if not self.router.models:
             for model_def in DEFAULT_MODELS:
                 info = ModelInfo(**model_def)
@@ -22,6 +31,8 @@ class PhoenixOrchestrator:
         self.message_count = 0
         setup_fts()
         self._load_personas()
+        if MEMORY_WORKER_ENABLED:
+            self._start_memory_worker()
 
     def _load_personas(self):
         self.personas = {}
@@ -32,7 +43,8 @@ class PhoenixOrchestrator:
 
     def get_working_memory(self, session_id):
         if session_id not in self.sessions:
-            self.sessions[session_id] = WorkingMemory(self.router.get_model("reasoning"), session_id)  # temporary; real model will be chosen per request
+            # Temporarily give it the reasoning model; will be overridden per request
+            self.sessions[session_id] = WorkingMemory(self.router.get_model("reasoning"), session_id)
         return self.sessions[session_id]
 
     def _load_p1_rules(self):
@@ -43,10 +55,8 @@ class PhoenixOrchestrator:
         return rules
 
     def _detect_task_hint(self, user_input: str) -> str:
-        """Simple keyword-based task detection. Returns 'reasoning', 'code', or 'simple'."""
         code_keywords = ["write a function", "implement", "code", "debug", "program", "python", "javascript", "function", "class", "script"]
         simple_keywords = ["what is", "tell me a joke", "quick", "simple", "yes or no", "short answer"]
-        # check coding first
         if any(word in user_input.lower() for word in code_keywords):
             return "code"
         if any(word in user_input.lower() for word in simple_keywords):
@@ -85,14 +95,11 @@ If you have enough information, answer directly in natural language.
         return text[:max_chars] + "..." if len(text) > max_chars else text
 
     def process_input(self, user_input: str, session_id="default"):
-        # Detect task and get appropriate model
         task_hint = self._detect_task_hint(user_input)
         llm = self.router.get_model(task_hint)
 
         wm = self.get_working_memory(session_id)
-        # Note: WorkingMemory currently holds a different model instance; we'll fix that by passing llm to get_working_memory later.
-        # For now, we'll override the wm's llm reference before using it in the rest of the method.
-        wm.llm = llm   # hack for now
+        wm.llm = llm   # ensure the working memory uses the same model for summarization
 
         relevant_memories = self.semantic_memory.recall(user_input, k=2)
         memory_context = "\n".join([f"- {self._trim_memory(m)}" for m in relevant_memories])
@@ -144,8 +151,7 @@ If you have enough information, answer directly in natural language.
             self.maybe_self_improve()
 
     def maybe_self_improve(self):
-        """Self‑improvement step using reasoning model."""
-        llm = self.router.get_model("reasoning")  # always use reasoning for introspection
+        llm = self.router.get_model("reasoning")
         gap_prompt = """You are Phoenix's self-analysis module.
 Review the last few conversations and list any topics you were unsure about or lacked current information.
 Output a JSON list of strings, e.g. ["topic1", "topic2"]. If none, output [].
@@ -185,3 +191,55 @@ Conversations:
     def clear_session(self, session_id):
         if session_id in self.sessions:
             del self.sessions[session_id]
+
+    # ---------- Proactive Memory Worker ----------
+    def _start_memory_worker(self):
+        def worker():
+            while True:
+                time.sleep(MEMORY_WORKER_INTERVAL)
+                try:
+                    self._run_memory_maintenance()
+                except Exception as e:
+                    logging.error(f"Memory worker error: {e}")
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        logger.info("Proactive memory worker started.")
+
+    def _run_memory_maintenance(self):
+        logger.info("Memory worker: starting maintenance cycle")
+
+        # 1. Citation verification (stub)
+        recent_mems = self.semantic_memory.recall("citation:", k=10)
+        stale_count = 0
+        for mem_text in recent_mems:
+            if "citation:" in mem_text and "stale" not in mem_text:
+                stale_count += 1
+        if stale_count > 0:
+            self.semantic_memory.add_memory(
+                f"Memory worker noticed {stale_count} unverified citations",
+                metadata={"type": "worker_log"}
+            )
+
+        # 2. Duplicate detection (placeholder)
+        duplicates = self.semantic_memory.find_duplicates()
+        for dup_id in duplicates:
+            self.semantic_memory.delete_memory_by_id(dup_id)
+            self.semantic_memory.add_memory(f"Removed duplicate memory {dup_id}",
+                                            metadata={"type": "worker_log"})
+
+        # 3. Consolidation
+        all_mems = self.semantic_memory.get_all_memories(limit=5)
+        if all_mems and len(all_mems) >= 3:
+            llm = self.router.get_model("reasoning")
+            summary_prompt = "Summarize these recent Phoenix memories into a concise knowledge item:\n"
+            for mem in all_mems:
+                summary_prompt += f"- {mem[:200]}\n"
+            summary_response = llm.invoke([HumanMessage(content=summary_prompt)])
+            summary_text = summary_response.content.strip()
+            self.semantic_memory.add_memory(
+                f"Consolidated knowledge: {summary_text}",
+                metadata={"type": "consolidation"}
+            )
+
+        logger.info("Memory worker: maintenance cycle complete")
