@@ -76,23 +76,24 @@ class WorkingMemory:
         conn.close()
 
     def _summarize_and_replace(self):
-        msgs = self.history.messages
-        if estimate_tokens(msgs) > self.max_tokens and len(msgs) > 2:
-            keep_last = 4
-            to_summarize = msgs[:-keep_last]
-            recent = msgs[-keep_last:]
+    msgs = self.history.messages
+    if estimate_tokens(msgs) > self.max_tokens and len(msgs) > 2:
+        keep_last = 4
+        to_summarize = msgs[:-keep_last]
+        recent = msgs[-keep_last:]
 
-            summary_prompt = "Summarize the following conversation concisely:\n"
-            for m in to_summarize:
-                summary_prompt += f"{m.type}: {m.content}\n"
-            summary_response = self.llm.invoke([HumanMessage(content=summary_prompt)])
-            summary_text = summary_response.content.strip()
-            summary_msg = SystemMessage(content=f"Conversation summary: {summary_text}")
+        summary_prompt = "Summarize the following conversation concisely:\n"
+        for m in to_summarize:
+            summary_prompt += f"{m.type}: {m.content}\n"
+        summary_response = self.llm.invoke([HumanMessage(content=summary_prompt)])
+        # 🔧 Fix: LlamaCpp returns a string, not an object with .content
+        summary_text = summary_response.strip() if isinstance(summary_response, str) else summary_response.content.strip()
+        summary_msg = SystemMessage(content=f"Conversation summary: {summary_text}")
 
-            self.history.clear()
-            self.history.add_message(summary_msg)
-            for m in recent:
-                self.history.add_message(m)
+        self.history.clear()
+        self.history.add_message(summary_msg)
+        for m in recent:
+            self.history.add_message(m)
 
     def get_messages_for_context(self):
         self._summarize_and_replace()
