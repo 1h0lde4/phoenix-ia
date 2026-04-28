@@ -11,13 +11,13 @@ from config import LLM_MODEL_PATH, P1_RULES_DIR, AUTO_IMPROVE_INTERVAL, AGENTS_D
 class PhoenixOrchestrator:
     def __init__(self):
         self.llm = LlamaCpp(
-            model_path=LLM_MODEL_PATH,
-            temperature=0.7,
-            max_tokens=572,                # reduced
-            n_ctx=8192,                    # main context
-            model_kwargs={"n_ctx": 8192},  # force via model_kwargs as backup
-            verbose=False
-        )
+    model_path=LLM_MODEL_PATH,
+    temperature=0.7,
+    max_tokens=512,                # can now be generous
+    n_ctx=8192,                    # Mistral's native 8K context
+    chat_format="mistral-instruct", # use Mistral's chat template
+    verbose=False
+)
         self.skill_registry = SkillRegistry()
         self.semantic_memory = SemanticMemoryStore()
         self.sessions = {}
